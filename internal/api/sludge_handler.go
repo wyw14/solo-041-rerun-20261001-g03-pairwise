@@ -59,12 +59,12 @@ func (s *Server) confirmHandover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	handover, err := s.plant.ConfirmHandover(lineID, input.PumpID, input.Generation, input.Flow)
+	handover, suppression, err := s.plant.ConfirmHandover(lineID, input.PumpID, input.Generation, input.Flow)
 	if err != nil {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, handover)
+	writeJSON(w, http.StatusOK, map[string]any{"handover": handover, "suppression": suppression})
 }
 
 func (s *Server) startDrain(w http.ResponseWriter, r *http.Request) {
@@ -92,12 +92,17 @@ func (s *Server) startSequence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	sequence, err := s.plant.StartSludgeSequence(lineID, input.PumpID, input.Number)
+	sequence, suppression, err := s.plant.StartSludgeSequence(lineID, input.PumpID, input.Number)
 	if err != nil {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, sequence)
+	if suppression != nil {
+		// The start was deferred (错峰) by the power budget; no sequence exists yet.
+		writeJSON(w, http.StatusAccepted, map[string]any{"deferred": true, "suppression": suppression})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"deferred": false, "sequence": sequence})
 }
 
 func (s *Server) confirmSequenceFlow(w http.ResponseWriter, r *http.Request) {
@@ -116,12 +121,12 @@ func (s *Server) confirmSequenceFlow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	sequence, err := s.plant.ConfirmSludgeFlow(lineID, sequenceID, input.Generation, input.Flow)
+	sequence, suppression, err := s.plant.ConfirmSludgeFlow(lineID, sequenceID, input.Generation, input.Flow)
 	if err != nil {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sequence)
+	writeJSON(w, http.StatusOK, map[string]any{"sequence": sequence, "suppression": suppression})
 }
 
 func (s *Server) failSequence(w http.ResponseWriter, r *http.Request) {

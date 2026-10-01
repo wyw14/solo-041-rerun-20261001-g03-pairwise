@@ -13,6 +13,7 @@ import (
 	"github.com/wyw14/cry-97/internal/api"
 	"github.com/wyw14/cry-97/internal/config"
 	"github.com/wyw14/cry-97/internal/model"
+	"github.com/wyw14/cry-97/internal/power"
 	"github.com/wyw14/cry-97/internal/process"
 )
 
@@ -32,7 +33,11 @@ func run() error {
 	}
 	clock := func() time.Time { return time.Now().UTC() }
 	lineIDs := []model.LineID{"line-1", "line-2", "line-3"}
-	plant, err := process.NewPlant(cfg.DataDir, lineIDs, clock)
+	plant, err := process.NewPlant(cfg.DataDir, lineIDs, clock, power.Config{
+		LimitKW: cfg.PowerLimitKW, ReserveKW: cfg.PowerReserveKW,
+		StaleAfter: cfg.PowerStaleAfter, StaggerWindow: cfg.PowerStaggerWindow,
+		MaxDefer: 10 * time.Minute, WrapTolerance: 0.5,
+	})
 	if err != nil {
 		return err
 	}
@@ -63,6 +68,9 @@ func run() error {
 			case <-ticker.C:
 				if _, runErr := plant.RunCompensations(maintenanceContext); runErr != nil && !errors.Is(runErr, context.Canceled) {
 					log.Printf("compensation maintenance: %v", runErr)
+				}
+				if _, runErr := plant.ReleaseDeferredPowerCommands(maintenanceContext); runErr != nil && !errors.Is(runErr, context.Canceled) {
+					log.Printf("power release maintenance: %v", runErr)
 				}
 			}
 		}

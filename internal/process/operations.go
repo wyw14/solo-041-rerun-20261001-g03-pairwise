@@ -9,15 +9,16 @@ import (
 	"github.com/wyw14/cry-97/internal/aeration"
 	"github.com/wyw14/cry-97/internal/dosing"
 	"github.com/wyw14/cry-97/internal/model"
+	"github.com/wyw14/cry-97/internal/power"
 	"github.com/wyw14/cry-97/internal/settling"
 )
 
-func (p *Plant) SubmitAeration(ctx context.Context, lineID model.LineID, basinID string, payload []byte) (aeration.Window, *model.DeviceCommand, error) {
+func (p *Plant) SubmitAeration(ctx context.Context, lineID model.LineID, basinID string, payload []byte) (aeration.Window, *model.DeviceCommand, *power.Suppression, error) {
 	p.mu.RLock()
 	state, ok := p.lines[lineID]
 	p.mu.RUnlock()
 	if !ok || state.Emergency {
-		return aeration.Window{}, nil, errors.New("process line cannot accept aeration samples")
+		return aeration.Window{}, nil, nil, errors.New("process line cannot accept aeration samples")
 	}
 	return p.aeration.SubmitWindow(ctx, lineID, basinID, payload, state.Generation, p.now())
 }

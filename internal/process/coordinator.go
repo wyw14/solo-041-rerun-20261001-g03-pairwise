@@ -18,6 +18,7 @@ import (
 	"github.com/wyw14/cry-97/internal/journal"
 	"github.com/wyw14/cry-97/internal/lab"
 	"github.com/wyw14/cry-97/internal/model"
+	"github.com/wyw14/cry-97/internal/power"
 	"github.com/wyw14/cry-97/internal/sensor"
 	"github.com/wyw14/cry-97/internal/settling"
 	"github.com/wyw14/cry-97/internal/sludge"
@@ -50,9 +51,10 @@ type Plant struct {
 	devices       *DeviceBus
 	sampler       *sensor.Sampler
 	receiver      *sensor.Receiver
+	power         *power.Governor
 }
 
-func NewPlant(dataDir string, lines []model.LineID, now func() time.Time) (*Plant, error) {
+func NewPlant(dataDir string, lines []model.LineID, now func() time.Time, powerCfg power.Config) (*Plant, error) {
 	if dataDir == "" || len(lines) == 0 || now == nil {
 		return nil, errors.New("plant data directory, lines and clock are required")
 	}
@@ -71,12 +73,27 @@ func NewPlant(dataDir string, lines []model.LineID, now func() time.Time) (*Plan
 	equalizers := make([]intake.Equalizer, 0, len(lines))
 	blowers := make([]aeration.Blower, 0, len(lines))
 	pumpList := make([]sludge.Pump, 0, len(lines)*2)
+	governed := make([]power.DeviceProfile, 0, len(lines)*3)
 	for index, lineID := range lines {
 		equalizers = append(equalizers, intake.Equalizer{ID: "EQ-" + string(lineID), Capacity: 1600 + float64(index*150)})
 		blowers = append(blowers, aeration.Blower{ID: "blower-basin-" + string(lineID), BasinID: "basin-" + string(lineID)})
 		pumpList = append(pumpList,
 			sludge.Pump{ID: "pump-" + string(lineID) + "-A", LineID: lineID, Kind: model.DevicePump},
 			sludge.Pump{ID: "pump-" + string(lineID) + "-B", LineID: lineID, Kind: model.DevicePump},
+		)
+		governed = append(governed,
+			power.DeviceProfile{
+				DeviceID: "blower-basin-" + string(lineID), LineID: lineID, Kind: model.DeviceBlower,
+				NameplateKW: 75, RatedOutput: 60, MinOutput: 28,
+			},
+			power.DeviceProfile{
+				DeviceID: "pump-" + string(lineID) + "-A", LineID: lineID, Kind: model.DevicePump,
+				NameplateKW: 22, RatedOutput: 300, MinOutput: 60,
+			},
+			power.DeviceProfile{
+				DeviceID: "pump-" + string(lineID) + "-B", LineID: lineID, Kind: model.DevicePump,
+				NameplateKW: 22, RatedOutput: 300, MinOutput: 60,
+			},
 		)
 	}
 	pool, err := intake.NewEqualizationPool(equalizers)
@@ -104,7 +121,13 @@ func NewPlant(dataDir string, lines []model.LineID, now func() time.Time) (*Plan
 	if err != nil {
 		return nil, err
 	}
-	aerationController, err := aeration.NewController(decoder, windows, fleet)
+	governor, err := power.NewGovernor(governed, power.LineBudget{
+		LimitKW: powerCfg.LimitKW, ReserveKW: powerCfg.ReserveKW,
+	}, powerCfg)
+	if err != nil {
+		return nil, err
+	}
+	aerationController, err := aeration.NewController(decoder, windows, fleet, governor)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +171,7 @@ func NewPlant(dataDir string, lines []model.LineID, now func() time.Time) (*Plan
 		settling: make(map[model.LineID]*settling.State), cycles: settling.NewCycleBook(),
 		interlocks: arbiter, drains: drains, pumps: pumps, handovers: sludge.NewHandoverBook(),
 		sequences: sequences, compensations: queue, devices: devices, sampler: sampler, receiver: receiver,
+		power: governor,
 	}
 	for _, lineID := range lines {
 		plant.lines[lineID] = model.NewLineState(lineID, now())

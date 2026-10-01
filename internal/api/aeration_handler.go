@@ -25,10 +25,10 @@ func (s *Server) aerationSample(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	window, command, err := s.plant.SubmitAeration(r.Context(), lineID, chi.URLParam(r, "basinID"), payload)
+	window, command, suppression, err := s.plant.SubmitAeration(r.Context(), lineID, chi.URLParam(r, "basinID"), payload)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"window": window, "command": command})
+	writeJSON(w, http.StatusAccepted, map[string]any{"window": window, "command": command, "suppression": suppression})
 }

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BioTreat 用电预算</title><link rel="stylesheet" href="/assets/app.css"></head>
+<body><header><div class="brand">BioTreat 工艺联控</div><nav><a href="/process">工艺总控</a><a href="/aeration">曝气调节</a><a href="/sludge">污泥回流</a><a aria-current="page" href="/power">用电预算</a><a href="/alarms">异常处置</a></nav></header>
+<main><div class="page-head"><div><h1>用电预算与命令闸门</h1><div class="muted">按处理线核算功率余量，非应急时对风机/回流泵命令限幅或错峰；最低曝气与最低回流不受限幅影响</div></div><div class="status"><span class="dot"></span><span id="health">checking</span></div></div>
+<div class="grid">
+<section class="panel wide"><h2>线路功率余量</h2><table><thead><tr><th>处理线</th><th>限额 kW</th><th>储备 kW</th><th>已计负载 kW</th><th>可用余量 kW</th><th>负载</th><th>遥测</th></tr></thead><tbody id="lines"></tbody></table></section>
+<section class="panel"><h2>调整线路预算</h2><form id="budget"><label>处理线<select name="line"><option>line-1</option><option>line-2</option><option>line-3</option></select></label><label>限额 kW<input name="limit" type="number" value="160" min="1" step="0.1"></label><label>储备 kW<input name="reserve" type="number" value="15" min="0" step="0.1"></label><button>保存预算</button></form></section>
+<section class="panel wide"><h2>设备电表</h2><table><thead><tr><th>设备</th><th>处理线</th><th>读数质量</th><th>功率 kW</th><th>累计 kWh</th><th>序号</th><th>观测时间</th></tr></thead><tbody id="meters"></tbody></table></section>
+<section class="panel"><h2>提交电表读数</h2><form id="reading"><label>设备<select name="device"><option>blower-basin-line-1</option><option>blower-basin-line-2</option><option>blower-basin-line-3</option><option>pump-line-1-A</option><option>pump-line-1-B</option><option>pump-line-2-A</option><option>pump-line-2-B</option><option>pump-line-3-A</option><option>pump-line-3-B</option></select></label><label>序号<input name="sequence" type="number" value="1" min="1"></label><label>累计电量 kWh<input name="energy" type="number" value="1000" min="0" step="0.1"></label><label>实时功率 kW<input name="power" type="number" value="40" min="0" step="0.1"></label><button>上报读数</button></form></section>
+<section class="panel wide"><h2>被抑制的命令</h2><table><thead><tr><th>时间</th><th>处理线</th><th>设备</th><th>类型</th><th>请求 → 实际</th><th>需余量 kW</th><th>恢复条件</th><th>状态</th></tr></thead><tbody id="suppressed"></tbody></table></section>
+<section class="panel"><h2>操作结果</h2><pre id="output">等待操作</pre></section>
+</div></main>
+<script src="/assets/common.js"></script><script>
+const fmt=n=>(Math.round(Number(n)*10)/10).toFixed(1);
+const qBadge=q=>({ok:['正常',''],stale:['过期','warn'],wrapped:['回卷','bad'],missing:['缺失','off']}[q]||[q,'off']);
+const sBadge=s=>({active:['活跃','warn'],recovered:['已恢复',''],expired:['已过期','off']}[s]||[s,'off']);
+async function load(){
+  const d=await request('/api/power');
+  document.querySelector('#lines').innerHTML=d.lines.map(l=>{
+    const pct=Math.max(0,Math.min(100,l.draw_kw/l.limit_kw*100));
+    const cls=l.available_kw<0?'over':(l.available_kw<l.limit_kw*0.15?'tight':'');
+    return `<tr><td>${l.line_id}</td><td>${fmt(l.limit_kw)}</td><td>${fmt(l.reserve_kw)}</td><td>${fmt(l.draw_kw)}</td><td><strong>${fmt(l.available_kw)}</strong></td><td><div class="budget-bar ${cls}"><span style="width:${pct}%"></span></div></td><td>${l.degraded?'<span class="badge warn">降级</span>':'<span class="badge">正常</span>'}</td></tr>`;
+  }).join('');
+  document.querySelector('#meters').innerHTML=d.meters.map(m=>{
+    const q=qBadge(m.quality);
+    return `<tr><td>${m.device_id}</td><td>${m.line_id}</td><td><span class="badge ${q[1]}">${q[0]}</span></td><td>${fmt(m.power_kw)}</td><td>${fmt(m.energy_kwh)}</td><td>${m.sequence||'-'}</td><td>${m.observed_at?new Date(m.observed_at).toLocaleTimeString():'-'}</td></tr>`;
+  }).join('');
+  document.querySelector('#suppressed').innerHTML=(d.suppressions||[]).map(s=>{
+    const st=sBadge(s.status);
+    const io=s.kind==='clamped'?`${fmt(s.requested_output)} → ${fmt(s.applied_output)}`:`${fmt(s.requested_output)}（待下发）`;
+    return `<tr><td>${new Date(s.created_at).toLocaleTimeString()}</td><td>${s.line_id}</td><td>${s.device_id}</td><td>${s.kind==='clamped'?'限幅':'错峰'}</td><td>${io}</td><td>${fmt(s.needed_kw)}</td><td>${s.recovery}</td><td><span class="badge ${st[1]}">${st[0]}</span></td></tr>`;
+  }).join('')||'<tr><td colspan="8" class="muted">当前没有被抑制的命令</td></tr>';
+}
+document.querySelector('#reading').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);try{show(await request('/api/power/readings',{method:'POST',body:JSON.stringify({readings:[{device_id:f.get('device'),sequence:Number(f.get('sequence')),energy_kwh:Number(f.get('energy')),power_kw:Number(f.get('power'))}]})}));load()}catch(err){showError(err)}});
+document.querySelector('#budget').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);try{show(await request(`/api/power/lines/${f.get('line')}/budget`,{method:'PUT',body:JSON.stringify({limit_kw:Number(f.get('limit')),reserve_kw:Number(f.get('reserve'))})}));load()}catch(err){showError(err)}});
+load().catch(showError);setInterval(()=>load().catch(()=>{}),5000);
+</script></body></html>
