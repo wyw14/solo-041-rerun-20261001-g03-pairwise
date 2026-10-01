@@ -38,6 +38,7 @@ func (p *Plant) EmergencyStop(ctx context.Context, lineID model.LineID, reason s
 	p.lines[lineID] = state
 	p.mu.Unlock()
 	p.devices.StopLine(lineID, state.Generation)
+	p.power.CancelLine(lineID)
 	p.equalizers.Release(lineID)
 	p.alarms.Raise(model.NewAlarm(lineID, "PROCESS_EMERGENCY", reason, model.SeverityCritical, now))
 	if err := p.snapshots.Save(state); err != nil {

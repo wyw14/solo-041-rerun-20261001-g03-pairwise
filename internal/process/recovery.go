@@ -62,6 +62,11 @@ func (p *Plant) ApplyRecovered(ctx context.Context, event model.Event) error {
 		if err := p.devices.Publish(ctx, command); err != nil {
 			return err
 		}
+		// Reflect replayed running state so minimum-return protection knows
+		// which pump was operating before the restart.
+		if _, known := p.power.Lookup(command.DeviceID); known {
+			p.power.MarkRunning(command.DeviceID, command.Setpoint)
+		}
 	}
 	state.LastEventSeq = event.Sequence
 	state.UpdatedAt = event.OccurredAt

@@ -11,6 +11,8 @@ import (
 func (s *Server) aerationStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"blowers": s.plant.StatusBlowers(), "windows": s.plant.StatusAerationWindows(),
+		"power":         s.plant.PowerHeadroom(),
+		"last_decision": s.plant.LastAerationDecision(),
 	})
 }
 
@@ -25,10 +27,12 @@ func (s *Server) aerationSample(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	window, command, err := s.plant.SubmitAeration(r.Context(), lineID, chi.URLParam(r, "basinID"), payload)
+	window, decision, err := s.plant.SubmitAerationGuarded(r.Context(), lineID, chi.URLParam(r, "basinID"), payload)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"window": window, "command": command})
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"window": window, "decision": decision,
+	})
 }

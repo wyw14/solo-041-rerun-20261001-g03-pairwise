@@ -96,6 +96,36 @@ func (c *PumpController) StopOwned(pumpID string, sequenceID uuid.UUID, generati
 	return pump, nil
 }
 
+// ApplyCommand applies a guard-routed manual command to a pump. A positive
+// setpoint marks it running; zero stops it. It does not touch sequence
+// ownership, which is managed by the handover/sequence workflows.
+func (c *PumpController) ApplyCommand(command model.DeviceCommand, now time.Time) (Pump, error) {
+	if command.Kind != model.DevicePump {
+		return Pump{}, errors.New("command target is not a return pump")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pump, ok := c.pumps[command.DeviceID]
+	if !ok {
+		return Pump{}, errors.New("return pump is not found")
+	}
+	if command.Setpoint < 0 {
+		return Pump{}, errors.New("pump setpoint cannot be negative")
+	}
+	pump.Running = command.Setpoint > 0
+	if pump.Running && pump.Flow == 0 {
+		// A nominal flow is only a placeholder until a metered confirmation
+		// arrives; the power guard relies on electrical readings, not this.
+		pump.Flow = 1
+	}
+	if !pump.Running {
+		pump.Flow = 0
+	}
+	pump.UpdatedAt = now.UTC()
+	c.pumps[command.DeviceID] = pump
+	return pump, nil
+}
+
 func (c *PumpController) Snapshot() []Pump {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

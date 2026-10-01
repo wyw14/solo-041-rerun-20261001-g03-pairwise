@@ -44,7 +44,14 @@ func (p *Plant) StartSludgeSequence(lineID model.LineID, pumpID string, number u
 }
 
 func (p *Plant) ConfirmSludgeFlow(lineID model.LineID, sequenceID uuid.UUID, generation uint64, flow float64) (sludge.Sequence, error) {
-	return p.sequences.ConfirmFlow(lineID, sequenceID, generation, flow, p.now())
+	sequence, err := p.sequences.ConfirmFlow(lineID, sequenceID, generation, flow, p.now())
+	if err != nil {
+		return sludge.Sequence{}, err
+	}
+	// Reflect the confirmed running pump so the budget guard knows the minimum
+	// return requirement is now held by this device.
+	p.power.MarkRunning(sequence.PumpID, 1)
+	return sequence, nil
 }
 
 func (p *Plant) FailSludgeSequence(lineID model.LineID) (sludge.Sequence, error) {
@@ -53,9 +60,19 @@ func (p *Plant) FailSludgeSequence(lineID model.LineID) (sludge.Sequence, error)
 
 func (p *Plant) RunCompensations(ctx context.Context) (int, error) {
 	now := p.now()
-	return p.compensations.ExecuteDue(ctx, now, func(callCtx context.Context, item journal.Compensation) error {
-		return p.sequences.ExecuteCompensation(callCtx, item, now)
+	executed, err := p.compensations.ExecuteDue(ctx, now, func(callCtx context.Context, item journal.Compensation) error {
+		if execErr := p.sequences.ExecuteCompensation(callCtx, item, now); execErr != nil {
+			return execErr
+		}
+		p.power.MarkRunning(item.DeviceID, 0)
+		return nil
 	})
+	if err != nil {
+		return executed, err
+	}
+	// A pump stopping may free enough power to release a staggered command.
+	_ = p.power.Reevaluate(ctx)
+	return executed, nil
 }
 
 func (p *Plant) Pumps() []sludge.Pump {

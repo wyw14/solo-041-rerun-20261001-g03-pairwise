@@ -18,38 +18,41 @@ import (
 	"github.com/wyw14/cry-97/internal/journal"
 	"github.com/wyw14/cry-97/internal/lab"
 	"github.com/wyw14/cry-97/internal/model"
+	"github.com/wyw14/cry-97/internal/power"
 	"github.com/wyw14/cry-97/internal/sensor"
 	"github.com/wyw14/cry-97/internal/settling"
 	"github.com/wyw14/cry-97/internal/sludge"
 )
 
 type Plant struct {
-	mu            sync.RWMutex
-	now           func() time.Time
-	lines         map[model.LineID]model.LineState
-	batches       map[uuid.UUID]model.Batch
-	lineBatches   map[model.LineID]uuid.UUID
-	store         *journal.FileStore
-	snapshots     *journal.SnapshotStore
-	intake        *intake.Controller
-	equalizers    *intake.EqualizationPool
-	aeration      *aeration.Controller
-	dosing        *dosing.Service
-	labResults    *lab.Results
-	permits       *discharge.PermitBook
-	valves        *discharge.ValveController
-	alarms        *alarm.Service
-	settling      map[model.LineID]*settling.State
-	cycles        *settling.CycleBook
-	interlocks    *interlock.Arbiter
-	drains        *sludge.DrainService
-	pumps         *sludge.PumpController
-	handovers     *sludge.HandoverBook
-	sequences     *sludge.SequenceBook
-	compensations *journal.CompensationQueue
-	devices       *DeviceBus
-	sampler       *sensor.Sampler
-	receiver      *sensor.Receiver
+	mu             sync.RWMutex
+	now            func() time.Time
+	lines          map[model.LineID]model.LineState
+	batches        map[uuid.UUID]model.Batch
+	lineBatches    map[model.LineID]uuid.UUID
+	store          *journal.FileStore
+	snapshots      *journal.SnapshotStore
+	intake         *intake.Controller
+	equalizers     *intake.EqualizationPool
+	aeration       *aeration.Controller
+	dosing         *dosing.Service
+	labResults     *lab.Results
+	permits        *discharge.PermitBook
+	valves         *discharge.ValveController
+	alarms         *alarm.Service
+	settling       map[model.LineID]*settling.State
+	cycles         *settling.CycleBook
+	interlocks     *interlock.Arbiter
+	drains         *sludge.DrainService
+	pumps          *sludge.PumpController
+	handovers      *sludge.HandoverBook
+	sequences      *sludge.SequenceBook
+	compensations  *journal.CompensationQueue
+	devices        *DeviceBus
+	sampler        *sensor.Sampler
+	receiver       *sensor.Receiver
+	power          *power.Manager
+	powerTelemetry *power.TelemetryBook
 }
 
 func NewPlant(dataDir string, lines []model.LineID, now func() time.Time) (*Plant, error) {
@@ -131,6 +134,24 @@ func NewPlant(dataDir string, lines []model.LineID, now func() time.Time) (*Plan
 		return nil, err
 	}
 	devices := NewDeviceBus()
+	powerProfiles := power.DefaultProfiles(lines)
+	powerRegistry, err := power.NewRegistry(powerProfiles)
+	if err != nil {
+		return nil, err
+	}
+	powerBudgets, err := power.NewBudgetBook(power.DefaultBudgets(lines))
+	if err != nil {
+		return nil, err
+	}
+	powerTelemetry := power.NewTelemetryBook(0)
+	powerCalculator, err := power.NewCalculator(powerBudgets, powerRegistry, powerTelemetry)
+	if err != nil {
+		return nil, err
+	}
+	powerManager, err := power.NewManager(powerCalculator, powerRegistry, powerTelemetry, now)
+	if err != nil {
+		return nil, err
+	}
 	dosingService, err := dosing.NewService(store, devices, dosing.NewLedger())
 	if err != nil {
 		return nil, err
@@ -148,6 +169,7 @@ func NewPlant(dataDir string, lines []model.LineID, now func() time.Time) (*Plan
 		settling: make(map[model.LineID]*settling.State), cycles: settling.NewCycleBook(),
 		interlocks: arbiter, drains: drains, pumps: pumps, handovers: sludge.NewHandoverBook(),
 		sequences: sequences, compensations: queue, devices: devices, sampler: sampler, receiver: receiver,
+		power: powerManager, powerTelemetry: powerTelemetry,
 	}
 	for _, lineID := range lines {
 		plant.lines[lineID] = model.NewLineState(lineID, now())
@@ -166,6 +188,7 @@ func NewPlant(dataDir string, lines []model.LineID, now func() time.Time) (*Plan
 	}); err != nil {
 		return nil, err
 	}
+	powerManager.BindReleaser(plant.releaseGuarded)
 	return plant, nil
 }
 

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BioTreat 异常处置</title><link rel="stylesheet" href="/assets/app.css"></head>
-<body><header><div class="brand">BioTreat 工艺联控</div><nav><a href="/process">工艺总控</a><a href="/aeration">曝气调节</a><a href="/sludge">污泥回流</a><a aria-current="page" href="/alarms">异常处置</a></nav></header>
+<body><header><div class="brand">BioTreat 工艺联控</div><nav><a href="/process">工艺总控</a><a href="/aeration">曝气调节</a><a href="/sludge">污泥回流</a><a href="/power">用电预算</a><a aria-current="page" href="/alarms">异常处置</a></nav></header>
 <main><div class="page-head"><div><h1>工艺告警</h1><div class="muted">当前异常、确认状态和处理线隔离信息</div></div><div class="status"><span class="dot"></span><span id="health">checking</span></div></div>
 <div class="grid"><section class="panel wide"><h2>告警队列</h2><table><thead><tr><th>级别</th><th>处理线</th><th>内容</th><th>状态</th><th></th></tr></thead><tbody id="alarms"></tbody></table></section><section class="panel"><h2>污泥界面采样</h2><form id="blanket"><label>处理线<select name="line"><option>line-1</option><option>line-2</option><option>line-3</option></select></label><label>界面高度 m<input name="level" type="number" step="0.1" value="3.1"></label><button>更新沉降状态</button></form></section><section class="panel wide"><h2>处置结果</h2><pre id="output">等待处置</pre></section></div></main>
 <script src="/assets/common.js"></script><script>

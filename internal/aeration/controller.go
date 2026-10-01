@@ -49,10 +49,14 @@ func (c *Controller) SubmitWindow(ctx context.Context, lineID model.LineID, basi
 		return Window{}, nil, err
 	}
 	command.Setpoint = target
-	if _, err := c.blowers.Apply(command, now); err != nil {
-		return Window{}, nil, err
-	}
+	// The caller routes the planned command through the power-budget guard and
+	// applies the (possibly clamped) result with ApplyCommand.
 	return window, &command, nil
+}
+
+// ApplyCommand commits a guarded blower command to the fleet state.
+func (c *Controller) ApplyCommand(command model.DeviceCommand, now time.Time) (Blower, error) {
+	return c.blowers.Apply(command, now)
 }
 
 func (c *Controller) Windows() []Window {

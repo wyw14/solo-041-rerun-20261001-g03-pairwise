@@ -9,17 +9,21 @@ import (
 	"github.com/wyw14/cry-97/internal/aeration"
 	"github.com/wyw14/cry-97/internal/dosing"
 	"github.com/wyw14/cry-97/internal/model"
+	"github.com/wyw14/cry-97/internal/power"
 	"github.com/wyw14/cry-97/internal/settling"
 )
 
-func (p *Plant) SubmitAeration(ctx context.Context, lineID model.LineID, basinID string, payload []byte) (aeration.Window, *model.DeviceCommand, error) {
-	p.mu.RLock()
-	state, ok := p.lines[lineID]
-	p.mu.RUnlock()
-	if !ok || state.Emergency {
-		return aeration.Window{}, nil, errors.New("process line cannot accept aeration samples")
+// LastAerationDecision exposes the most recent guard verdict (nil if no
+// aeration command has been adjudicated yet).
+func (p *Plant) LastAerationDecision() *power.Decision {
+	history := p.power.History()
+	for index := len(history) - 1; index >= 0; index-- {
+		decision := history[index]
+		if decision.Command.Kind == model.DeviceBlower {
+			return &decision
+		}
 	}
-	return p.aeration.SubmitWindow(ctx, lineID, basinID, payload, state.Generation, p.now())
+	return nil
 }
 
 func (p *Plant) ChangeDose(ctx context.Context, lineID model.LineID, batchID uuid.UUID, chemical string, rate float64) (model.DeviceCommand, error) {

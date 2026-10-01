@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BioTreat 用电预算</title><link rel="stylesheet" href="/assets/app.css"></head>
+<body><header><div class="brand">BioTreat 工艺联控</div><nav><a href="/process">工艺总控</a><a href="/aeration">曝气调节</a><a href="/sludge">污泥回流</a><a aria-current="page" href="/power">用电预算</a><a href="/alarms">异常处置</a></nav></header>
+<main>
+  <div class="page-head"><div><h1>用电预算控制</h1><div class="muted">按处理线计算可信功率余量，对非应急风机/回流泵命令限幅或错峰；读数过期或电能表回卷时不给出虚假余量</div></div><div class="status"><span class="dot"></span><span id="health">checking</span></div></div>
+  <div class="grid">
+    <section class="panel wide"><h2>各处理线功率余量</h2><table><thead><tr><th>处理线</th><th>合同容量</th><th>当前功率</th><th>最低保障</th><th>可信余量</th><th>读数状态</th></tr></thead><tbody id="headroom"></tbody></table></section>
+    <section class="panel"><h2>设备读数</h2><div class="rows" id="devices"></div></section>
+    <section class="panel"><h2>上报电表 / 实时功率</h2><form id="telemetry">
+      <label>设备<select name="device" id="telDevice"></select></label>
+      <label>来源<select name="source"><option value="power">实时功率 (W)</option><option value="meter">电能表累计 (kWh)</option></select></label>
+      <label>数值<input name="value" type="number" step="0.001" value="21000"></label>
+      <label>序列号（可选，递增）<input name="sequence" type="number" value="0"></label>
+      <label>观测时间（留空=当前，RFC3339）<input name="observed" placeholder="2026-09-30T10:00:00Z"></label>
+      <button>上报读数</button>
+    </form></section>
+    <section class="panel"><h2>手动设备命令</h2><form id="command">
+      <label>处理线<select name="line"><option>line-1</option><option>line-2</option><option>line-3</option></select></label>
+      <label>设备<select name="device" id="cmdDevice"></select></label>
+      <label>类型<select name="kind"><option value="blower">风机（频率 Hz）</option><option value="pump">回流泵（1 启动 / 0 停止）</option></select></label>
+      <label>设定值<input name="setpoint" type="number" step="0.1" value="36"></label>
+      <button>提交命令（经预算守卫）</button>
+    </form></section>
+    <section class="panel"><h2>被抑制的命令与恢复条件</h2><div class="rows" id="suppressed"><div class="muted">当前没有被抑制的命令</div></div></section>
+    <section class="panel wide"><h2>最近守卫裁决</h2><table><thead><tr><th>时间</th><th>设备</th><th>裁决</th><th>原因</th><th>最终设定</th></tr></thead><tbody id="decisions"></tbody></table></section>
+    <section class="panel wide"><h2>操作结果</h2><pre id="output">等待操作</pre></section>
+  </div>
+</main>
+<script src="/assets/common.js"></script>
+<script>
+const deviceIDs = [];
+for (const line of ["line-1","line-2","line-3"]) {
+  deviceIDs.push(`blower-basin-${line}`, `pump-${line}-A`, `pump-${line}-B`);
+}
+function fillDeviceSelects(){
+  const opts = deviceIDs.map(id=>`<option>${id}</option>`).join("");
+  document.querySelector('#telDevice').innerHTML = opts;
+  document.querySelector('#cmdDevice').innerHTML = opts;
+}
+function fmtW(v){ return (v/1000).toFixed(1)+" kW"; }
+function problemLabel(p){
+  return ({stale_reading:"读数过期",meter_rollback:"电能表回卷",no_reading:"尚无读数",sequence_gap:"序列号回退"}[p]) || p || "正常";
+}
+async function load(){
+  const d = await request('/api/power');
+  document.querySelector('#headroom').innerHTML = d.headroom.map(h=>{
+    const trust = h.trusted
+      ? `<span style="color:#2b9a65">可信</span>`
+      : `<span style="color:#a63e37">不可信（余量置 0）：${[...new Set(h.problems)].map(problemLabel).join("、")}</span>`;
+    return `<tr><td>${h.line_id}</td><td>${fmtW(h.capacity_w)}</td><td>${fmtW(h.current_w)}</td><td>${fmtW(h.reserved_w)}</td><td><strong>${fmtW(h.headroom_w)}</strong></td><td>${trust}</td></tr>`;
+  }).join("");
+  const devices = d.headroom.flatMap(h=>h.devices.map(x=>({...x,line:h.line_id})));
+  document.querySelector('#devices').innerHTML = devices.map(x=>{
+    const age = x.age_seconds != null ? `${Math.round(x.age_seconds)}s` : "-";
+    const color = x.trusted ? "#2b9a65" : "#a63e37";
+    const resync = !x.trusted && x.problem==="meter_rollback"
+      ? ` <button type="button" class="danger" style="padding:2px 8px;font-size:11px" data-resync="${x.device_id}">重新同步</button>` : "";
+    return `<div class="row"><span>${x.device_id}<br><small class="muted">${x.line_id} · ${age}</small></span><strong style="color:${color}">${x.trusted ? fmtW(x.power_w) : problemLabel(x.problem)}${resync}</strong></div>`;
+  }).join("");
+  document.querySelectorAll('[data-resync]').forEach(btn=>btn.addEventListener('click', async ()=>{
+    try{ show(await request(`/api/power/devices/${btn.dataset.resync}/resync`,{method:'POST'})); load(); }catch(e){ showError(e); }
+  }));
+  const sup = d.suppressed || [];
+  document.querySelector('#suppressed').innerHTML = sup.length ? sup.map(s=>`
+    <div class="row" style="display:block;border-bottom:1px solid #edf0f1;padding-bottom:10px">
+      <strong style="color:#a63e37">⛔ ${s.command.device_id} · ${({peak_shaving:"超预算错峰",readings_untrusted:"读数不可信",publish_failed:"下发失败"})[s.reason]||s.reason}</strong>
+      <div class="muted" style="margin:4px 0">期望功率 ${fmtW(s.desired_w)} · 抑制于 ${new Date(s.suppressed_at).toLocaleTimeString()}</div>
+      <ul style="margin:4px 0 0 18px;padding:0;font-size:12px;color:#53636b">${(s.recovery_conditions||[]).map(c=>`<li>${c}</li>`).join("")}</ul>
+    </div>`).join("") : `<div class="muted">当前没有被抑制的命令</div>`;
+  document.querySelector('#decisions').innerHTML = (d.decisions||[]).slice().reverse().map(x=>`
+    <tr><td>${new Date(x.decided_at).toLocaleTimeString()}</td><td>${x.command.device_id}</td>
+    <td style="color:${({allowed:"#2b9a65",clamped:"#b8860b",deferred:"#a63e37",rejected:"#a63e37",bypassed:"#206c63"})[x.outcome]||"#172027"}">${({allowed:"放行",clamped:"限幅放行",deferred:"错峰抑制",rejected:"拒绝",bypassed:"应急绕过"})[x.outcome]||x.outcome}</td>
+    <td class="muted">${x.reason||""}</td><td>${x.final_setpoint||""}</td></tr>`).join("");
+}
+document.querySelector('#telemetry').addEventListener('submit', async e=>{
+  e.preventDefault(); const f=new FormData(e.target);
+  const source=f.get('source'); const body={device_id:f.get('device'),source,sequence:Number(f.get('sequence'))||0};
+  if(source==="power") body.power_w=Number(f.get('value')); else body.energy_kwh=Number(f.get('value'));
+  if(f.get('observed')) body.observed_at=f.get('observed');
+  try{ show(await request('/api/power/telemetry',{method:'POST',body:JSON.stringify(body)})); }catch(err){ showError(err); }
+  load();
+});
+document.querySelector('#command').addEventListener('submit', async e=>{
+  e.preventDefault(); const f=new FormData(e.target);
+  const body={device_id:f.get('device'),kind:f.get('kind'),setpoint:Number(f.get('setpoint'))};
+  try{ show(await request(`/api/power/lines/${f.get('line')}/commands`,{method:'POST',body:JSON.stringify(body)})); }catch(err){ showError(err); }
+  load();
+});
+fillDeviceSelects();
+load().catch(showError);
+setInterval(()=>load().catch(()=>{}), 5000);
+</script></body></html>

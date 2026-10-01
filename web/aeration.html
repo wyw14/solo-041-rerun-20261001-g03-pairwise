@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BioTreat 曝气调节</title><link rel="stylesheet" href="/assets/app.css"></head>
-<body><header><div class="brand">BioTreat 工艺联控</div><nav><a href="/process">工艺总控</a><a aria-current="page" href="/aeration">曝气调节</a><a href="/sludge">污泥回流</a><a href="/alarms">异常处置</a></nav></header>
+<body><header><div class="brand">BioTreat 工艺联控</div><nav><a href="/process">工艺总控</a><a aria-current="page" href="/aeration">曝气调节</a><a href="/sludge">污泥回流</a><a href="/power">用电预算</a><a href="/alarms">异常处置</a></nav></header>
 <main><div class="page-head"><div><h1>曝气稳定窗口</h1><div class="muted">按生化池隔离采样并下发风机目标</div></div><div class="status"><span class="dot"></span><span id="health">checking</span></div></div>
 <div class="grid"><section class="panel wide"><h2>风机与窗口</h2><div class="rows" id="aeration"></div></section><section class="panel"><h2>提交溶氧批次</h2><form id="sample"><label>处理线<select name="line"><option>line-1</option><option>line-2</option><option>line-3</option></select></label><label>生化池<input name="basin" value="basin-line-1"></label><label>最近采样<input name="values" value="2.0,2.1,2.2,2.1,2.0"></label><button>刷新稳定窗口</button></form></section><section class="panel wide"><h2>控制结果</h2><pre id="output">等待采样</pre></section></div></main>
 <script src="/assets/common.js"></script><script>
